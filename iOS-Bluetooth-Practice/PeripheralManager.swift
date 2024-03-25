@@ -8,28 +8,48 @@
 import UIKit
 import CoreBluetooth
 
-let serviceUUID1: String = "FFF0"
+let serviceUUID1: String = "FFE0"
 
 let writeCharacteristicUUID: String = "FFF1"
 
 let readBatteryCharacteristicUUID: String = "FFF2"
 
-let readBatteryRemainCharacteristicUUID: String = "FFF3"
+let readCharacteristicUUID: String = "FFF3"
 
 let peripheralName: String = "Howard测试工程"
+
+protocol PeripheralManagerDelegate: NSObjectProtocol {
+    
+    func readValue(peripheralManager: CBPeripheralManager, text: String)
+}
 
 class PeripheralManager: NSObject {
     
     var manager: CBPeripheralManager!
     
+    weak var delegate: PeripheralManagerDelegate?
+    
+    var countCharacteristic: CBMutableCharacteristic?
+    
     var shouldSendArray: [CBMutableCharacteristic] = []
     
-    var runloop: RunLoop?
+    var timer: Timer?
     
     override init() {
         super.init()
         let queue = DispatchQueue(label: NSStringFromClass(PeripheralManager.self), qos: .background, attributes: .concurrent, autoreleaseFrequency: .inherit, target: nil)
         manager = CBPeripheralManager(delegate: self, queue: queue, options: nil)
+    }
+    
+    func writeValue(count: Int) {
+        if count <= 0 {
+            return
+        }
+        let data = "\(count)".data(using: .utf8)!
+        let result = manager.updateValue(data, for: countCharacteristic!, onSubscribedCentrals: nil)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 3) {
+            self.writeValue(count: count - 1)
+        }
     }
 }
 
@@ -40,10 +60,11 @@ extension PeripheralManager: CBPeripheralManagerDelegate {
         case .poweredOn:
             let service1 = CBMutableService(type: .init(string: serviceUUID1), primary: true)
             let writeCharacteristic = CBMutableCharacteristic(type: .init(string: writeCharacteristicUUID), properties: .write, value: nil, permissions: .writeable)
-            let readBatteryCharacteristic = CBMutableCharacteristic(type: .init(string: readBatteryCharacteristicUUID), properties: .read, value: nil, permissions: .readable)
-            let readRemainCharacteristic = CBMutableCharacteristic(type: .init(string: readBatteryRemainCharacteristicUUID), properties: [.read, .notify], value: nil, permissions: [.readable])
-            service1.characteristics = [writeCharacteristic, readBatteryCharacteristic, readRemainCharacteristic]
+            let readBatteryCharacteristic = CBMutableCharacteristic(type: .init(string: readBatteryCharacteristicUUID), properties: [.read, .notify], value: nil, permissions: .readable)
+            let readCharacteristicUUID = CBMutableCharacteristic(type: .init(string: readCharacteristicUUID), properties: .read, value: nil, permissions: .readable)
+            service1.characteristics = [writeCharacteristic, readBatteryCharacteristic, readCharacteristicUUID]
             manager.add(service1)
+            self.countCharacteristic = readBatteryCharacteristic
             break
         default:
             break
@@ -90,7 +111,7 @@ extension PeripheralManager: CBPeripheralManagerDelegate {
                 let data = "\(UIDevice.current.batteryLevel)".data(using: .utf8)!
                 request.value = data
                 peripheral.respond(to: request, withResult: .success)
-            } else if request.characteristic.uuid.uuidString == readBatteryRemainCharacteristicUUID {
+            } else if request.characteristic.uuid.uuidString == readCharacteristicUUID {
                 let data = "\(UIDevice.current.batteryLevel)".data(using: .utf8)!
                 request.value = data
                 peripheral.respond(to: request, withResult: .success)
@@ -107,7 +128,11 @@ extension PeripheralManager: CBPeripheralManagerDelegate {
         for request in requests {
             if (request.characteristic.properties.rawValue & CBCharacteristicProperties.write.rawValue) != 0 {
                 if let data = request.value {
-                    print("[蓝牙外设] --- 接收[\(String(data: data, encoding: .utf8) ?? "nil")]")
+                    let text = String(data: data, encoding: .utf8) ?? "nil"
+                    print("[蓝牙外设] --- 接收[\(text)]")
+                    DispatchQueue.main.async {
+                        self.delegate?.readValue(peripheralManager: self.manager, text: text)
+                    }
                 }
             } else {
                 peripheral.respond(to: request, withResult: .writeNotPermitted)
@@ -128,31 +153,26 @@ extension PeripheralManager: CBPeripheralManagerDelegate {
         shouldSendArray.removeAll()
     }
     
-    func peripheralManager(_ peripheral: CBPeripheralManager, didOpen channel: CBL2CAPChannel?, error: Error?) {
-        print("[蓝牙外设] --- 通道打开")
-    }
-    
     func startLoop(characteristic: CBCharacteristic) {
-        let timer = Timer(timeInterval: 1, repeats: true) { timer in
-            let date = Date()
-            let formatter = DateFormatter()
-            formatter.dateFormat = "yyyy-MM-dd HH:mm:ss"
-            let data = formatter.string(from: date).data(using: .utf8)!
-            let mutableChara: CBMutableCharacteristic = .init(type: characteristic.uuid, properties: characteristic.properties, value: data, permissions: .readable)
-            let result = self.manager.updateValue(data, for: mutableChara, onSubscribedCentrals: nil)
-            if !result {
-                self.shouldSendArray.append(mutableChara)
+        DispatchQueue.main.async {
+            let timer = Timer.scheduledTimer(withTimeInterval: 2, repeats: true) { timer in
+                let date = Date()
+                let formatter = DateFormatter()
+                formatter.dateFormat = "yyyy-MM-dd HH:mm:ss"
+                let data = "\(formatter.string(from: date))：\(UIDevice.current.batteryLevel)".data(using: .utf8)!
+                let mutableChara: CBMutableCharacteristic = .init(type: characteristic.uuid, properties: characteristic.properties, value: data, permissions: .readable)
+                let result = self.manager.updateValue(data, for: mutableChara, onSubscribedCentrals: nil)
+                if !result {
+                    self.shouldSendArray.append(mutableChara)
+                }
             }
         }
-        let runloop = RunLoop()
-        runloop.add(timer, forMode: .default)
-        runloop.run(mode: .default, before: .now + 3)
-        self.runloop = runloop
     }
     
     func stopLoop() {
-        if let runloop = runloop {
-            CFRunLoopStop(runloop.getCFRunLoop())
+        DispatchQueue.main.async {
+            self.timer?.invalidate()
+            self.timer = nil
         }
     }
 }

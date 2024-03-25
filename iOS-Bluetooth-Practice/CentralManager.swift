@@ -4,6 +4,8 @@ import CoreBluetooth
 protocol CentralManagerDelegate: NSObjectProtocol {
     
     func discover(peripheralObject: PeripheralObject)
+    
+    func readValue(centralManager: CBCentralManager, text: String)
 }
 
 class PeripheralObject: NSObject {
@@ -27,11 +29,11 @@ class CentralManager: NSObject {
     
     var connectPeripheral: CBPeripheral?
         
-    var readCharacteristic: CBCharacteristic?
-    
-    var writeCharacteristic: CBCharacteristic?
-    
-    var readRemainCharacteristic: CBCharacteristic?
+//    var readCharacteristic: CBCharacteristic?
+//    
+//    var writeCharacteristic: CBCharacteristic?
+//    
+//    var readRemainCharacteristic: CBCharacteristic?
     
     var delegate: CentralManagerDelegate?
     
@@ -42,7 +44,9 @@ class CentralManager: NSObject {
     override init() {
         super.init()
         let queue: DispatchQueue = .init(label: NSStringFromClass(CentralManager.self), qos: .background, attributes: .concurrent, autoreleaseFrequency: .inherit, target: nil)
-        let options: [String : Any] = [CBCentralManagerOptionShowPowerAlertKey : NSNumber(booleanLiteral: true), CBCentralManagerOptionRestoreIdentifierKey : "unique identifer"]
+        let options: [String : Any] = [
+            CBCentralManagerOptionShowPowerAlertKey : NSNumber(value: true),
+            CBCentralManagerOptionRestoreIdentifierKey : "unique identifer"]
         certralManager = .init(delegate: self, queue: queue, options: options)
     }
     
@@ -51,25 +55,35 @@ class CentralManager: NSObject {
         certralManager.connect(peripheral, options: nil)
     }
     
-    func writeValue() {
-        if let writeCharacteristic = writeCharacteristic {
-            let date = Date()
-            let fomatter = DateFormatter()
-            fomatter.dateFormat = "yyyy-MM-dd HH:mm:ss"
-            let data = "来自管理中心：\(fomatter.string(from: date))通信一次".data(using: .utf8)!
-            connectPeripheral?.writeValue(data, for: writeCharacteristic, type: .withResponse)
+    func writeValue(text: String) {
+        for service in connectPeripheral?.services ?? [] {
+            if service.uuid.uuidString != serviceUUID1 {
+                continue
+            }
+            for characteristic in service.characteristics ?? [] {
+                if characteristic.uuid.uuidString == writeCharacteristicUUID {
+                    let date = Date()
+                    let fomatter = DateFormatter()
+                    fomatter.dateFormat = "yyyy-MM-dd HH:mm:ss"
+                    let data = "\(fomatter.string(from: date))：\(text)".data(using: .utf8)!
+                    connectPeripheral?.writeValue(data, for: characteristic, type: .withResponse)
+                    break
+                }
+            }
         }
     }
     
-    func readValue() {
-        if let readCharacteristic = readCharacteristic {
-            connectPeripheral?.readValue(for: readCharacteristic)
-        }
-    }
-    
-    func readRemainValue() {
-        if let readRemainCharacteristic = readRemainCharacteristic {
-            connectPeripheral?.setNotifyValue(true, for: readRemainCharacteristic)
+    func readPowerValue() {
+        for service in connectPeripheral?.services ?? [] {
+            if service.uuid.uuidString != serviceUUID1 {
+                continue
+            }
+            for characteristic in service.characteristics ?? [] {
+                if characteristic.uuid.uuidString == readCharacteristicUUID {
+                    connectPeripheral?.readValue(for: characteristic)
+                    break
+                }
+            }
         }
     }
 }
@@ -82,7 +96,7 @@ extension CentralManager: CBCentralManagerDelegate {
         } else if central.state == .poweredOn { // 开启
 //            let uuid = CBUUID(string: serviceUUID1)
             central.scanForPeripherals(withServices: nil, options: [
-                CBCentralManagerScanOptionAllowDuplicatesKey : NSNumber(booleanLiteral: false)
+                CBCentralManagerScanOptionAllowDuplicatesKey : NSNumber(value: false)
             ])
         } else if central.state == .resetting { //
             
@@ -145,10 +159,10 @@ extension CentralManager: CBPeripheralDelegate {
         for service in peripheral.services ?? [] {
             print("[管理中心] --- 发现服务，uuid：\(service.uuid)")
             if service.uuid.uuidString == serviceUUID1 {
-                let readUUID = CBUUID(string: readBatteryCharacteristicUUID)
+                let readBatteryUUID = CBUUID(string: readBatteryCharacteristicUUID)
                 let writeUUID = CBUUID(string: writeCharacteristicUUID)
-                let readRemainUUID = CBUUID(string: readBatteryRemainCharacteristicUUID)
-                peripheral.discoverCharacteristics([readUUID, writeUUID, readRemainUUID], for: service)
+                let readUUID = CBUUID(string: readCharacteristicUUID)
+                peripheral.discoverCharacteristics([readBatteryUUID, writeUUID, readUUID], for: service)
             }
         }
     }
@@ -160,16 +174,9 @@ extension CentralManager: CBPeripheralDelegate {
         }
         if service.uuid.uuidString == serviceUUID1 {
             for characteristic in service.characteristics ?? [] {
+                print("[管理中心] --- 发现特征，uuid：\(characteristic.uuid.uuidString)")
                 if characteristic.uuid.uuidString == readBatteryCharacteristicUUID {
-                    readCharacteristic = characteristic
-                    print("[管理中心] --- 发现特征，uuid：\(readBatteryCharacteristicUUID)")
-                    peripheral.readValue(for: characteristic)
-                } else if characteristic.uuid.uuidString == writeCharacteristicUUID {
-                    writeCharacteristic = characteristic
-                    print("[管理中心] --- 发现特征，uuid：\(writeCharacteristicUUID)")
-                } else if characteristic.uuid.uuidString == readBatteryRemainCharacteristicUUID {
-                    readRemainCharacteristic = characteristic
-                    print("[管理中心] --- 发现特征，uuid：\(readBatteryRemainCharacteristicUUID)")
+                    peripheral.setNotifyValue(true, for: characteristic)
                 }
             }
         }
@@ -180,8 +187,11 @@ extension CentralManager: CBPeripheralDelegate {
             print("[管理中心] --- 收到消息，失败：\(error.localizedDescription)")
         } else {
             if let data = characteristic.value {
-                let text = String(data: data, encoding: .utf8)
-                print("[管理中心] --- 收到消息：\(text ?? "nil")")
+                let text = String(data: data, encoding: .utf8) ?? "nil"
+                print("[管理中心] --- 收到消息：\(text)")
+                DispatchQueue.main.async {
+                    self.delegate?.readValue(centralManager: self.certralManager, text: text)
+                }
             }
         }
     }
