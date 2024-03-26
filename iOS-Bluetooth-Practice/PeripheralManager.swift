@@ -55,11 +55,11 @@ class PeripheralManager: NSObject {
         let data = "\(count)".data(using: .utf8)!
         // 若data太长，需要分包
         
-        let mutable = CBMutableCharacteristic(type: character.uuid, properties: character.properties, value: data, permissions: .readable)
-        let result = manager.updateValue(data, for: mutable, onSubscribedCentrals: nil)
+        let mutableCharacter = character as! CBMutableCharacteristic
+        let result = manager.updateValue(data, for: mutableCharacter, onSubscribedCentrals: nil)
         if !result {
             objc_sync_enter(self)
-            self.shouldSendArray.append(mutable)
+            self.shouldSendArray.append(mutableCharacter)
             objc_sync_exit(self)
         }
         print("[蓝牙外设] --- 写\(count), result:\(result)")
@@ -109,12 +109,12 @@ extension PeripheralManager: CBPeripheralManagerDelegate {
         
         let text = "订阅成功"
         let data = text.data(using: .utf8)!
-        let mutableChara: CBMutableCharacteristic = .init(type: characteristic.uuid, properties: characteristic.properties, value: data, permissions: .readable)
-        let result = peripheral.updateValue(data, for: mutableChara, onSubscribedCentrals: nil)
+        let mutableCharacter = characteristic as! CBMutableCharacteristic
+        let result = peripheral.updateValue(data, for: mutableCharacter, onSubscribedCentrals: nil)
         print("[蓝牙外设] --- \(central.identifier)订阅特征\(characteristic.uuid.uuidString), 订阅回传:\(text), result:\(result)")
         if !result {
             objc_sync_enter(self)
-            shouldSendArray.append(mutableChara)
+            shouldSendArray.append(mutableCharacter)
             objc_sync_exit(self)
         }
     }
