@@ -27,6 +27,8 @@ class PeripheralManager: NSObject {
     
     weak var delegate: PeripheralManagerDelegate?
     
+    var subDict: Dictionary<CBCharacteristic, [CBCentral]> = [:]
+    
     var shouldSendArray: [CBMutableCharacteristic] = []
     
     var timer: Timer?
@@ -41,9 +43,19 @@ class PeripheralManager: NSObject {
         if count <= 0 {
             return
         }
+        var temp: CBCharacteristic?
+        for key in subDict.keys {
+            if key.uuid.uuidString == readCharacteristicUUID {
+                temp = key
+            }
+        }
+        guard let character = temp else {
+            return
+        }
         let data = "\(count)".data(using: .utf8)!
         // 若data太长，需要分包
-        let mutable = CBMutableCharacteristic(type: .init(string: readCharacteristicUUID), properties: [.read, .notify], value: data, permissions: .readable)
+        
+        let mutable = CBMutableCharacteristic(type: character.uuid, properties: character.properties, value: data, permissions: .readable)
         let result = manager.updateValue(data, for: mutable, onSubscribedCentrals: nil)
         if !result {
             objc_sync_enter(self)
@@ -91,11 +103,15 @@ extension PeripheralManager: CBPeripheralManagerDelegate {
     }
     
     func peripheralManager(_ peripheral: CBPeripheralManager, central: CBCentral, didSubscribeTo characteristic: CBCharacteristic) {
+        var centrals = subDict[characteristic] ?? []
+        centrals.append(central)
+        subDict[characteristic] = centrals
+        
         let text = "订阅成功"
         let data = text.data(using: .utf8)!
         let mutableChara: CBMutableCharacteristic = .init(type: characteristic.uuid, properties: characteristic.properties, value: data, permissions: .readable)
         let result = peripheral.updateValue(data, for: mutableChara, onSubscribedCentrals: nil)
-        print("[蓝牙外设] --- 接收到uuid:\(characteristic.uuid.uuidString)订阅, 订阅回传:\(text), result:\(result)")
+        print("[蓝牙外设] --- \(central.identifier)订阅特征\(characteristic.uuid.uuidString), 订阅回传:\(text), result:\(result)")
         if !result {
             objc_sync_enter(self)
             shouldSendArray.append(mutableChara)
@@ -104,7 +120,13 @@ extension PeripheralManager: CBPeripheralManagerDelegate {
     }
     
     func peripheralManager(_ peripheral: CBPeripheralManager, central: CBCentral, didUnsubscribeFrom characteristic: CBCharacteristic) {
-        print("[蓝牙外设] --- 取消订阅")
+        var centrals = subDict[characteristic]
+        centrals?.removeAll { ele in
+            ele.identifier.uuidString == central.identifier.uuidString
+        }
+        subDict[characteristic] = centrals
+        
+        print("[蓝牙外设] --- \(central.identifier)取消订阅特征\(characteristic.uuid.uuidString)")
     }
     
     func peripheralManager(_ peripheral: CBPeripheralManager, didReceiveRead request: CBATTRequest) {
