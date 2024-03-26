@@ -159,10 +159,9 @@ extension CentralManager: CBPeripheralDelegate {
         for service in peripheral.services ?? [] {
             print("[管理中心] --- 发现服务，uuid：\(service.uuid)")
             if service.uuid.uuidString == serviceUUID1 {
-                let readBatteryUUID = CBUUID(string: readBatteryCharacteristicUUID)
                 let writeUUID = CBUUID(string: writeCharacteristicUUID)
                 let readUUID = CBUUID(string: readCharacteristicUUID)
-                peripheral.discoverCharacteristics([readBatteryUUID, writeUUID, readUUID], for: service)
+                peripheral.discoverCharacteristics([writeUUID, readUUID], for: service)
             }
         }
     }
@@ -175,7 +174,7 @@ extension CentralManager: CBPeripheralDelegate {
         if service.uuid.uuidString == serviceUUID1 {
             for characteristic in service.characteristics ?? [] {
                 print("[管理中心] --- 发现特征，uuid：\(characteristic.uuid.uuidString)")
-                if characteristic.uuid.uuidString == readBatteryCharacteristicUUID {
+                if characteristic.uuid.uuidString == readCharacteristicUUID {
                     peripheral.setNotifyValue(true, for: characteristic)
                 }
             }
