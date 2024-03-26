@@ -156,24 +156,23 @@ extension PeripheralManager: CBPeripheralManagerDelegate {
     
     func peripheralManager(_ peripheral: CBPeripheralManager, didReceiveWrite requests: [CBATTRequest]) {
         print("[蓝牙外设] --- 接收到写请求")
-        for request in requests {
-            if (request.characteristic.properties.rawValue & CBCharacteristicProperties.write.rawValue) != 0 {
-                if let data = request.value {
-                    let text = String(data: data, encoding: .utf8) ?? "nil"
-                    print("[蓝牙外设] --- 接收[\(text)]")
-                    DispatchQueue.main.async {
-                        self.delegate?.readValue(peripheralManager: self.manager, text: text)
-                    }
-                }
-            } else {
-                peripheral.respond(to: request, withResult: .writeNotPermitted)
-                return
+        if requests.count <= 0 {
+            return
+        }
+        let request = requests[0]
+        if (request.characteristic.properties.rawValue & CBCharacteristicProperties.write.rawValue) == 0 {
+            peripheral.respond(to: request, withResult: .writeNotPermitted)
+            return
+        }
+        if let data = request.value {
+            let text = String(data: data, encoding: .utf8) ?? "nil"
+            print("[蓝牙外设] --- 接收[\(text)]")
+            DispatchQueue.main.async {
+                self.delegate?.readValue(peripheralManager: self.manager, text: text)
             }
         }
         // 如果所有请求都被完成，回传写入成功。随便取一个request
-        if let first = requests.first {
-            peripheral.respond(to: first, withResult: .success)
-        }
+        peripheral.respond(to: request, withResult: .success)
     }
     
     func peripheralManagerIsReady(toUpdateSubscribers peripheral: CBPeripheralManager) {
